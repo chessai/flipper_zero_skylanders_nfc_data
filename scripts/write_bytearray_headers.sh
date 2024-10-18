@@ -1,14 +1,17 @@
 #!/bin/bash
 
-# Convert the .nfc file to a C array (xxd -i format) and declare it before the asset array
+# Get the number of .nfc files and store it in a variable
+nfc_count=$(find skylanders_data/ -name '*.nfc' | wc -l)
+
+# Convert the .nfc file to a C array (xxd -i format) and store it in a separate buffer for runtime initialization
 convert_file_to_c_array() {
     local file_path="$1"
     local var_name="$2"
-    local header_file="$3"
+    local c_file="$3"
 
-    # Use xxd to generate the byte array and its length variable with the correct name
-    xxd -i "$file_path" | sed "s/unsigned int \w*/unsigned int ${var_name}_nfc_len/" >> "$header_file"
-    echo "" >> "$header_file"  # Add a newline after the array declaration
+    # Generate the byte array using xxd and append it to the .c file
+    xxd -i "$file_path" >> "$c_file"
+    echo "" >> "$c_file"  # Add a newline after the array declaration
 }
 
 # Create a struct definition for assets in the header
@@ -17,33 +20,61 @@ write_struct_definition() {
     echo "#pragma once" > "$header_file"
     echo "" >> "$header_file"
     echo "#include <stddef.h>" >> "$header_file"  # For size_t
+    echo "#include <stdlib.h>" >> "$header_file"  # For malloc, free
+    echo "#include <string.h>" >> "$header_file"  # For memcpy
     echo "" >> "$header_file"
 
-        # Define the Asset struct
+    # Define the Asset struct with flexible array member for data
     cat <<EOL >> "$header_file"
 typedef struct {
-    unsigned char* data;
     size_t data_len;
     const char* name;   // basename without extension, "nfc_file" in the script
     const char* game;   // the game it's in, "game_dir" in the script
     const char* type;   // Figure, Magic Item, etc. "asset_dir" in the script
+    unsigned char data[];  // Flexible array member for data
 } Asset;
+
+Asset* create_asset(const unsigned char* data, size_t data_len, const char* name, const char* game, const char* type);
+void free_asset(Asset* asset);
+
+extern Asset* assets[];  // Declare assets array externally
 
 EOL
 }
 
-# Write the array of assets declaration (without entries) to the header file
-write_asset_array_declaration() {
-    local header_file="$1"
-    echo "Asset assets[] = {" >> "$header_file"
+# Write the function to dynamically allocate and initialize assets in a .c file
+write_asset_functions() {
+    local c_file="$1"
+
+    cat <<EOL >> "$c_file"
+#include <stdlib.h>
+#include <string.h>
+#include "skylanders_assets.h"
+
+// Function to create an Asset dynamically
+Asset* create_asset(const unsigned char* data, size_t data_len, const char* name, const char* game, const char* type) {
+    // Allocate memory for the Asset struct plus the data array
+    Asset* asset = (Asset*)malloc(sizeof(Asset) + data_len);
+    if (!asset) return NULL;
+
+    // Initialize the fields
+    asset->data_len = data_len;
+    asset->name = name;
+    asset->game = game;
+    asset->type = type;
+
+    // Copy the data into the flexible array member
+    memcpy(asset->data, data, data_len);
+
+    return asset;
 }
 
-# Close the array of assets in the header file
-close_asset_array() {
-    local header_file="$1"
-    echo "};" >> "$header_file"
-    echo "" >> "$header_file"
-    echo "define ASSET_COUNT (sizeof(assets) / sizeof(assets[0]))" >> "$header_file"
+// Function to free the dynamically allocated Asset
+void free_asset(Asset* asset) {
+    free(asset);
+}
+
+EOL
 }
 
 # Strip the Skylanders_<number>_ prefix from the game name
@@ -52,16 +83,21 @@ strip_game_prefix() {
     echo "$game_name" | sed 's/^Skylanders_[0-9]\+_//'
 }
 
-# Directory for generated headers
+# Directory for generated headers and source files
 rm -rf "skylanders_data/headers"
 mkdir -p "skylanders_data/headers"
 header_file="skylanders_data/headers/skylanders_assets.h"
+c_file="skylanders_data/headers/skylanders_assets.c"
 
 # Write the struct definition at the top of the header file
 write_struct_definition "$header_file"
+write_asset_functions "$c_file"
 
-# Buffer to hold the asset array definition to be written at the end
-asset_array_buffer=""
+# Declare the assets array with size based on the number of .nfc files
+echo "Asset* assets[$nfc_count];" >> "$c_file"  # Dynamically set the array size
+
+# Buffer to hold the runtime asset creation calls
+runtime_creation_buffer="void initialize_assets() {\n    int asset_index = 0;\n"  # Declare asset_index locally
 
 # Iterate over each game directory
 for game_dir in skylanders_data/*; do
@@ -78,22 +114,21 @@ for game_dir in skylanders_data/*; do
 
                 echo "Processing $nfc_file..."
 
-                # Convert the file to a C array (write declarations first)
-                convert_file_to_c_array "$nfc_file" "$var_name" "$header_file"
+                # Convert the file to a C array and store it in the .c file
+                convert_file_to_c_array "$nfc_file" "$var_name" "$c_file"
 
                 # Strip Skylanders_<number>_ prefix from the game directory name
                 game_name="$(strip_game_prefix "$(basename "$game_dir")")"
 
-                # Prepare the asset struct entry (to be written later in the array)
-                asset_array_buffer+=$(cat <<EOL
-
+                # Add code to create the asset dynamically at runtime using asset_index
+                runtime_creation_buffer+=$(cat <<EOL
     {
-        $var_name,
-        ${var_name}_nfc_len,
-        "$(basename "$nfc_file" .nfc)",
-        "$game_name",
-        "$(basename "$asset_dir")"
-    },
+        extern unsigned char skylanders_data_${var_name}_nfc[];
+        extern unsigned int skylanders_data_${var_name}_nfc_len;
+        assets[asset_index] = create_asset(skylanders_data_${var_name}_nfc, skylanders_data_${var_name}_nfc_len,
+            "$(basename "$nfc_file" .nfc)", "$game_name", "$(basename "$asset_dir")");
+        asset_index++;
+    }
 EOL
 )
             fi
@@ -101,14 +136,11 @@ EOL
     done
 done
 
-# Write the array of assets declaration
-write_asset_array_declaration "$header_file"
+# Close the runtime creation function
+runtime_creation_buffer+="}\n"
 
-# Append all asset entries to the array
-echo "$asset_array_buffer" >> "$header_file"
-
-# Close the asset array declaration
-close_asset_array "$header_file"
+# Append the runtime creation function to the .c file
+echo -e "$runtime_creation_buffer" >> "$c_file"
 
 echo "Header file created at $header_file!"
-
+echo "Source file created at $c_file!"
