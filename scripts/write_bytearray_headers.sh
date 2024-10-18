@@ -26,6 +26,8 @@ write_struct_definition() {
 
     # Define the Asset struct with flexible array member for data
     cat <<EOL >> "$header_file"
+#define ASSET_COUNT $nfc_count  // Define the total number of assets
+
 typedef struct {
     size_t data_len;
     const char* name;   // basename without extension, "nfc_file" in the script
@@ -36,8 +38,9 @@ typedef struct {
 
 Asset* create_asset(const unsigned char* data, size_t data_len, const char* name, const char* game, const char* type);
 void free_asset(Asset* asset);
+void initialize_assets();  // Declaration of initialize_assets()
 
-extern Asset* assets[];  // Declare assets array externally
+extern Asset* assets[ASSET_COUNT];  // Declare assets array with size ASSET_COUNT
 
 EOL
 }
@@ -93,9 +96,8 @@ c_file="skylanders_data/headers/skylanders_assets.c"
 write_struct_definition "$header_file"
 write_asset_functions "$c_file"
 
-# Declare the assets array with size based on the number of .nfc files
-echo "#define ASSET_COUNT $nfc_count" >> "$header_file"
-echo "Asset* assets[ASSET_COUNT];" >> "$c_file"  # Dynamically set the array size
+# Declare the assets array with size based on the number of .nfc files (ASSET_COUNT)
+echo "Asset* assets[ASSET_COUNT];" >> "$c_file"
 
 # Buffer to hold the runtime asset creation calls
 runtime_creation_buffer="void initialize_assets() {\n    int asset_index = 0;\n"  # Declare asset_index locally
@@ -123,13 +125,9 @@ for game_dir in skylanders_data/*; do
 
                 # Add code to create the asset dynamically at runtime using asset_index
                 runtime_creation_buffer+=$(cat <<EOL
-    {
-        extern unsigned char skylanders_data_${var_name}_nfc[];
-        extern unsigned int skylanders_data_${var_name}_nfc_len;
-        assets[asset_index] = create_asset(skylanders_data_${var_name}_nfc, skylanders_data_${var_name}_nfc_len,
-            "$(basename "$nfc_file" .nfc)", "$game_name", "$(basename "$asset_dir")");
-        asset_index++;
-    }
+    assets[asset_index] = create_asset(skylanders_data_${var_name}_nfc, skylanders_data_${var_name}_nfc_len,
+        "$(basename "$nfc_file" .nfc)", "$game_name", "$(basename "$asset_dir")");
+    asset_index++;
 EOL
 )
             fi
