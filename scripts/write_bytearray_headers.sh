@@ -94,7 +94,8 @@ write_struct_definition "$header_file"
 write_asset_functions "$c_file"
 
 # Declare the assets array with size based on the number of .nfc files
-echo "Asset* assets[$nfc_count];" >> "$c_file"  # Dynamically set the array size
+echo "#define ASSET_COUNT $nfc_count" >> "$header_file"
+echo "Asset* assets[ASSET_COUNT];" >> "$c_file"  # Dynamically set the array size
 
 # Buffer to hold the runtime asset creation calls
 runtime_creation_buffer="void initialize_assets() {\n    int asset_index = 0;\n"  # Declare asset_index locally

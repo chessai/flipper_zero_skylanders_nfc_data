@@ -17,3 +17,4 @@ void free_asset(Asset* asset);
 
 extern Asset* assets[];  // Declare assets array externally
 
+#define ASSET_COUNT 782
