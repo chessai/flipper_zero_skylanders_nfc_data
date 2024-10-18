@@ -1,0 +1,17 @@
+# For details & more options, see documentation/AppManifests.md in firmware repo
+
+App(
+    appid="skylanders_nfc_data",  # Must be unique
+    name="Skylanders NFC Data",  # Displayed in menus
+    apptype=FlipperAppType.EXTERNAL,
+    entry_point="skylanders_nfc_data_app",
+    stack_size=2 * 1024,
+    fap_category="NFC",
+    # Optional values
+    # fap_version="0.1",
+    fap_icon="skylanders_nfc_data.png",  # 10x10 1-bit PNG
+    # fap_description="A simple app",
+    fap_author="chessai",
+    fap_weburl="https://github.com/chessai/flipper_zero_skylanders_nfc_data",
+    # fap_icon_assets="images",  # Image assets to compile for this application
+)
